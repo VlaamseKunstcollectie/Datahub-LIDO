@@ -1,0 +1,43 @@
+#!perl
+
+use XML::LibXML;
+use Catmandu;
+use Data::Dumper;
+use Path::Tiny;
+use Term::ProgressBar;
+
+my $file   = shift || die "usage $0 <xmlfile>";
+my $parser = XML::LibXML->new();
+my $doc    = $parser->parse_file( $file );
+my $nodes  = $doc->findnodes( 'adlibXML/recordList/record' );
+
+my $counter = scalar @$nodes;
+my $progress = Term::ProgressBar->new($counter);
+
+my $adlibDir = path('/tmp/adlib');
+my $lidoDir = path('/tmp/lido');
+
+foreach my $node ( @$nodes ) {
+    # Hack. Each record node could be viewed as an independent, self-describing
+    # XML document. So we just prefix the elemnt with an XML header.
+    my $xml = '<?xml version="1.0" encoding="UTF-8" ?>';
+    $xml = $xml . $node->toString();
+
+    # Generate a tmp file. Use the record/priref as the filename.
+    # We assume that priref is the unique database identifier
+    my $xmlDom = $parser->parse_string($xml);
+    my @nodes = $xmlDom->findnodes('record/priref');
+    my $node = shift @nodes;
+    my $identifier = $node->firstChild->data, "\n";
+    $file = $adlibDir->child("$identifier.xml");
+    $file->spew_utf8($xml);
+
+    # Conversion to YAML.
+    my $importer = Catmandu->importer('XML', file => "/tmp/adlib/$identifier.xml");
+    my $exporter = Catmandu->exporter('YAML', file => "/tmp/lido/$identifier.xml");
+    $exporter->add_many($importer);
+
+    $file->remove();
+    $progress->update();
+}
+

@@ -1,0 +1,10 @@
+/Datahub-LIDO-*
+/.build
+/_build*
+/Build
+MYMETA.*
+!META.json
+/.prove
+/*.xml
+cpanfile.snapshot
+local
