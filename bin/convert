@@ -1,43 +1,37 @@
 #!perl
 
+use strict;
+use warnings;
+use diagnostics;
+
 use XML::LibXML;
 use Catmandu;
 use Data::Dumper;
-use Path::Tiny;
-use Term::ProgressBar;
+use Log::Log4perl;
+use Log::Log4perl::Level;
+
+Log::Log4perl->easy_init( Log::Log4perl::Level::to_priority( 'WARN' ) );
+my $logger = Log::Log4perl->get_logger();
 
 my $file   = shift || die "usage $0 <xmlfile>";
-my $parser = XML::LibXML->new();
-my $doc    = $parser->parse_file( $file );
-my $nodes  = $doc->findnodes( 'adlibXML/recordList/record' );
+my $fix   = shift || die "usage $1 <fixfile>";
 
-my $counter = scalar @$nodes;
-my $progress = Term::ProgressBar->new($counter);
+my $importer = Catmandu->importer('XML', file => $file, data_path => 'recordList.record.*');
+my $exporter = Catmandu->exporter('LIDO');
+my $fixer = Catmandu->fixer($fix);
 
-my $adlibDir = path('/tmp/adlib');
-my $lidoDir = path('/tmp/lido');
+$fixer->fix($importer)->each(sub {
+		my $item = $_[0];
+		eval {
+			$exporter->add($item);
+		};
+		if ($@) {
+			 # logging logic
+			 my $msg = "Error: " . $item->{administrativeMetadata}->{recordWrap}->{recordID}->[0]->{"_"} . ' :: ' . $@;
+			 $logger->error($msg);
+		}
+	});
 
-foreach my $node ( @$nodes ) {
-    # Hack. Each record node could be viewed as an independent, self-describing
-    # XML document. So we just prefix the elemnt with an XML header.
-    my $xml = '<?xml version="1.0" encoding="UTF-8" ?>';
-    $xml = $xml . $node->toString();
+$exporter->commit;
 
-    # Generate a tmp file. Use the record/priref as the filename.
-    # We assume that priref is the unique database identifier
-    my $xmlDom = $parser->parse_string($xml);
-    my @nodes = $xmlDom->findnodes('record/priref');
-    my $node = shift @nodes;
-    my $identifier = $node->firstChild->data, "\n";
-    $file = $adlibDir->child("$identifier.xml");
-    $file->spew_utf8($xml);
-
-    # Conversion to YAML.
-    my $importer = Catmandu->importer('XML', file => "/tmp/adlib/$identifier.xml");
-    my $exporter = Catmandu->exporter('YAML', file => "/tmp/lido/$identifier.xml");
-    $exporter->add_many($importer);
-
-    $file->remove();
-    $progress->update();
-}
 
